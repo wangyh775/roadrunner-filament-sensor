@@ -157,8 +157,9 @@ class RegisterReaderUART(RegisterReaderGeneric):
             return val
 
 class RegisterReaderI2C(RegisterReaderGeneric):
-    def __init__(self, i2c):
+    def __init__(self, i2c, name="RegisterReaderI2C"):
         self.i2c = i2c
+        self.name = name
         self.printer = i2c.mcu.get_printer()
 
     def read(self):
@@ -514,13 +515,50 @@ class VirtualSwitchWrapper(VirtualButtonWrapper):
     def register_callback(self, sensor, cb):
         sensor.register_switch_callback(cb)
 
-class RunoutHelper(filament_switch_sensor.RunoutHelper):
+class RunoutHelper:
     def __init__(self, config, sensor):
-        super().__init__(config)
+        self.name = config.get_name().split()[-1]
         self._sensor = sensor
+        self.printer = config.get_printer()
+        self.reactor = self.printer.get_reactor()
+        self.gcode = self.printer.lookup_object('gcode')
+        # Read config
+        self.runout_pause = config.getboolean('pause_on_runout', True)
+        if self.runout_pause:
+            self.printer.load_object(config, 'pause_resume')
+        self.runout_gcode = None
+        self.insert_gcode = None
+        gcode_macro = self.printer.load_object(config, 'gcode_macro')
+        if self.runout_pause or config.get('runout_gcode', None) is not None:
+            self.runout_gcode = gcode_macro.load_template(
+                config, 'runout_gcode', '')
+        if config.get('insert_gcode', None) is not None:
+            self.insert_gcode = gcode_macro.load_template(
+                config, 'insert_gcode')
+        self.pause_delay = config.getfloat('pause_delay', 0.5, minval=0.)
+        self.event_delay = config.getfloat('event_delay', 3., minval=0.)
+        # Internal state
+        self.min_event_systime = self.reactor.NEVER
+        self.sensor_enabled = True
+        # Register commands and event handlers
+        self.printer.register_event_handler("klippy:ready", self._handle_ready)
+        self.gcode.register_mux_command(
+            "QUERY_FILAMENT_SENSOR", "SENSOR",
+            self.name, self.cmd_QUERY_FILAMENT_SENSOR,
+            desc="Query the status of the Filament Sensor")
+        self.gcode.register_mux_command(
+            "SET_FILAMENT_SENSOR", "SENSOR",
+            self.name, self.cmd_SET_FILAMENT_SENSOR,
+            desc="Sets the filament sensor on/off")
+
+    def _handle_ready(self):
+        self.min_event_systime = self.reactor.monotonic() + 2.0
 
     def cmd_QUERY_FILAMENT_SENSOR(self, gcmd):
         return self._sensor.cmd_QUERY_FILAMENT_SENSOR(gcmd)
+
+    def cmd_SET_FILAMENT_SENSOR(self, gcmd):
+        self.sensor_enabled = gcmd.get_int("ENABLE", 1)
 
 class HighResolutionFilamentSensor:
     """ A filament sensor from which we can get extremely accurate position readings. """
@@ -543,7 +581,7 @@ class HighResolutionFilamentSensor:
             self.regs = RegisterReaderUART(uart)
         else:
             i2c = bus.MCU_I2C_from_config(config, DEFAULT_I2C_TARGET_ADDR, DEFAULT_I2C_SPEED)
-            self.regs = RegisterReaderI2C(i2c)
+            self.regs = RegisterReaderI2C(i2c, self.name)
 
         self.extruder_name = config.get('extruder')
         self.invert_direction = config.getboolean('invert_direction', False)
