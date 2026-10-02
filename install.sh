@@ -39,6 +39,7 @@ link_extension()
 {
     echo "Linking ${EXTENSION_NAME} to Klippy extras..."
     ln -sf ${SRCDIR}/klippy/extras/*.py ${KLIPPER_PATH}/klippy/extras/
+    rm -f ${KLIPPER_PATH}/klippy/extras/__pycache__/high_resolution_filament_sensor*.pyc
 }
 
 # install python requirements to klippy env
