@@ -590,6 +590,7 @@ class HighResolutionFilamentSensor:
         self.underextrusion_period = config.getfloat('underextrusion_period', minval=0.0)
         self.move_evaluation_distance = config.getfloat('move_evaluation_distance', 3, minval=0.0)
         self.hysteresis_bits = config.getint('hysteresis_bits', 3, minval=0, maxval=12) # ignore lower 3 bits by default
+        self.check_filament_presence = config.getboolean('check_filament_presence', True)
 
         # Printer state
         self._commanded_moves : list[CommandedMove] = []
@@ -930,7 +931,7 @@ class HighResolutionFilamentSensor:
         the filament is not detected, or after the configured period of time when
         underextruding. """
 
-        if not self._filament_present:
+        if self.check_filament_presence and not self._filament_present:
             return True
 
         rate = self._measured_underextrusion_rate(self._status_evaluation_move)
